@@ -41,7 +41,7 @@ module CapistranoUnicorn
             if extracted_pid
               extracted_pid
             else
-              logger.important "err :: failed to auto-detect pid from #{local_unicorn_config}"
+              logger.important "err :: failed to detect pid file on the server"
               logger.important "err :: falling back to default: #{unicorn_default_pid}"
               unicorn_default_pid
             end

@@ -1,20 +1,19 @@
 module CapistranoUnicorn
   module Utility
 
-    def local_unicorn_config
-      File.exist?(unicorn_config_file_path) ?
-          unicorn_config_file_path
-        : unicorn_config_stage_file_path
-    end
-
     def extract_pid_file
       code = <<-EOC.gsub(/^ */, '').gsub(/\n/, '; ')
-        cfg = Unicorn::Configurator.new(:config_file => '#{local_unicorn_config}')
+        cfg = Unicorn::Configurator.new(:config_file => '${UNICORN_CONFIG_PATH}')
         puts cfg.set[:pid]
         exit 0
       EOC
 
-      pid = capture("cd #{app_path} && unicorn -e \"#{code}\"", :roles => unicorn_roles).rstrip
+      command = %Q%
+        #{set_unicorn_config_env}
+        #{unicorn_command} -e "#{code}"
+      %
+
+      pid = capture(command, :roles => unicorn_roles).rstrip
       pid == "unset" ? nil : File.expand_path(pid, app_path)
     end
 
@@ -86,16 +85,7 @@ module CapistranoUnicorn
     #
     def start_unicorn
       %Q%
-        if [ -e "#{unicorn_config_file_path}" ]; then
-          UNICORN_CONFIG_PATH=#{unicorn_config_file_path};
-        else
-          if [ -e "#{unicorn_config_stage_file_path}" ]; then
-            UNICORN_CONFIG_PATH=#{unicorn_config_stage_file_path};
-          else
-            echo "Config file for "#{unicorn_env}" environment was not found at either "#{unicorn_config_file_path}" or "#{unicorn_config_stage_file_path}"";
-            exit 1;
-          fi;
-        fi;
+        #{set_unicorn_config_env}
 
         if [ -e "#{unicorn_pid}" ]; then
           if #{try_unicorn_user} kill -0 `cat #{unicorn_pid}` > /dev/null 2>&1; then
@@ -107,7 +97,7 @@ module CapistranoUnicorn
         fi;
 
         echo "Starting Unicorn...";
-        cd #{app_path} && #{try_unicorn_user} RAILS_ENV=#{rails_env} BUNDLE_GEMFILE=#{bundle_gemfile} #{unicorn_bundle} exec #{unicorn_bin} -c $UNICORN_CONFIG_PATH -E #{unicorn_rack_env} -D #{unicorn_options};
+        #{unicorn_command} -D #{unicorn_options};
       %
     end
 
@@ -128,5 +118,23 @@ module CapistranoUnicorn
       defer{ fetch(:unicorn_roles, :app) }
     end
 
+    def set_unicorn_config_env
+      %Q%
+        if [ -e "#{unicorn_config_file_path}" ]; then
+          UNICORN_CONFIG_PATH=#{unicorn_config_file_path};
+        else
+          if [ -e "#{unicorn_config_stage_file_path}" ]; then
+            UNICORN_CONFIG_PATH=#{unicorn_config_stage_file_path};
+          else
+            echo "Config file for "#{unicorn_env}" environment was not found at either "#{unicorn_config_file_path}" or "#{unicorn_config_stage_file_path}"";
+            exit 1;
+          fi;
+        fi;
+      %
+    end
+
+    def unicorn_command
+      "cd #{app_path} && #{try_unicorn_user} RAILS_ENV=#{rails_env} BUNDLE_GEMFILE=#{bundle_gemfile} #{unicorn_bundle} exec #{unicorn_bin} -c $UNICORN_CONFIG_PATH -E #{unicorn_rack_env}"
+    end
   end
 end
